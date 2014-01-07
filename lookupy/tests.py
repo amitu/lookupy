@@ -12,9 +12,10 @@
 import re
 from nose.tools import assert_list_equal, assert_equal, assert_raises
 
-from .lookupy import dunder_key_val, filter_items, lookup, \
-    include_keys, flatten_keys, undunder_dict, Q, \
-    QuerySet, Collection, LookupyError
+from .lookupy import filter_items, lookup, include_keys, Q, QuerySet, \
+    Collection, LookupyError
+from .dunderkey import dunderkey, dunder_partition, dunder_init, dunder_last, \
+    dunder_get, undunder_keys, dunder_truncate
 
 
 entries_fixtures = [{'request': {'url': 'http://example.com', 'headers': [{'name': 'Connection', 'value': 'Keep-Alive'}]},
@@ -38,18 +39,12 @@ def ik(entries, fields):
 
 ## Tests
 
-def test_dunder_key_val():
-    d = dict([('a', 'A'),
-              ('p', {'q': 'Q'}),
-              ('x', {'y': {'z': 'Z'}})])
-    assert dunder_key_val(d, 'a') == 'A'
-    assert dunder_key_val(d, 'p__q') == 'Q'
-    assert dunder_key_val(d, 'x__y__z') == 'Z'
+
 
 
 def test_Collection():
     c = Collection(entries_fixtures)
-    assert_list_equal(list(c.items), entries_fixtures)
+    assert_list_equal(list(c), entries_fixtures)
     assert_list_equal(list(c), entries_fixtures)
 
 
@@ -256,27 +251,6 @@ def test_include_keys():
                        {'response__status': 200, 'cookies': None}])
 
 
-# check that response__status is flattened to 'status' since it's
-# unique but 'response__headers' and 'request__headers' stay the same
-# since, 'headers' is not unique
-def test_flatten_keys():
-    entry = {'request__url': 'http://example.com', 'request__headers': [{'name': 'Connection', 'value': 'Keep-Alive',}],
-             'response__status': 404, 'response__headers': [{'name': 'Date', 'value': 'Thu, 13 Jun 2013 06:43:14 GMT'}]}
-    assert_equal(flatten_keys(entry),
-                 {'url': 'http://example.com',
-                  'request__headers': [{'name': 'Connection', 'value': 'Keep-Alive',}],
-                  'status': 404,
-                  'response__headers': [{'name': 'Date', 'value': 'Thu, 13 Jun 2013 06:43:14 GMT'}]})
-
-
-def test_undunder_dict():
-    entry = {'request__url': 'http://example.com', 'request__headers': [{'name': 'Connection', 'value': 'Keep-Alive',}],
-             'response__status': 404, 'response__headers': [{'name': 'Date', 'value': 'Thu, 13 Jun 2013 06:43:14 GMT'}]}
-    assert_equal(undunder_dict(entry),
-                 {'request': {'url': 'http://example.com', 'headers': [{'name': 'Connection', 'value': 'Keep-Alive',}]},
-                  'response': {'status': 404, 'headers': [{'name': 'Date', 'value': 'Thu, 13 Jun 2013 06:43:14 GMT'}]}})
-
-
 def test_Collection_QuerySet():
     data = [{'framework': 'Django', 'language': 'Python', 'type': 'full-stack'},
             {'framework': 'Flask', 'language': 'Python', 'type': 'micro'},
@@ -285,24 +259,77 @@ def test_Collection_QuerySet():
             {'framework': 'Zend', 'language': 'PHP', 'type': 'full-stack'},
             {'framework': 'Slim', 'language': 'PHP', 'type': 'micro'}]
     c = Collection(data)
-    r1 = c.items.filter(framework__startswith='S')
+    r1 = c.filter(framework__startswith='S')
     assert isinstance(r1, QuerySet)
     assert len(list(r1)) == 2
-    r2 = c.items.filter(Q(language__exact='Python') | Q(language__exact='Ruby'))
+    r2 = c.filter(Q(language__exact='Python') | Q(language__exact='Ruby'))
     assert len(list(r2)) == 4
-    r3 = c.items.filter(language='PHP')
+    r3 = c.filter(language='PHP')
     assert_list_equal(list(r3.select('framework', 'type')),
                       [{'framework': 'Zend', 'type': 'full-stack'},
                        {'framework': 'Slim', 'type': 'micro'}])
-    r4 = c.items.filter(Q(language__exact='Python') | Q(language__exact='Ruby'))
+    r4 = c.filter(Q(language__exact='Python') | Q(language__exact='Ruby'))
     assert_list_equal(list(r4.select('framework')),
                       [{'framework': 'Django'},
                        {'framework': 'Flask'},
                        {'framework': 'Rails'},
                        {'framework': 'Sinatra'}])
     # :todo: test with flatten=True
-    r5 = c.items.filter(framework__startswith='S').select('framework', 'somekey')
+    r5 = c.filter(framework__startswith='S').select('framework', 'somekey')
     assert_list_equal(list(r5),
                       [{'framework': 'Sinatra', 'somekey': None},
                        {'framework': 'Slim', 'somekey': None}])
+
+
+## nesdict tests
+
+def test_dunderkey():
+    assert dunderkey('a', 'b', 'c') == 'a__b__c'
+    assert dunderkey('a') == 'a'
+    assert dunderkey('name', 'school_name') == 'name__school_name'
+
+
+def test_dunder_partition():
+    assert dunder_partition('a__b') == ('a', 'b')
+    assert dunder_partition('a__b__c') == ('a__b', 'c')
+    assert dunder_partition('a') == ('a', None)
+
+
+def test_dunder_init():
+    assert dunder_init('a__b') == 'a'
+    assert dunder_init('a__b__c') == 'a__b'
+    assert dunder_init('a') == 'a'
+
+
+def test_dunder_last():
+    assert dunder_last('a__b') == 'b'
+    assert dunder_last('a__b__c') == 'c'
+    assert dunder_last('a') == None
+
+
+def test_dunder_get():
+    d = dict([('a', 'A'),
+              ('p', {'q': 'Q'}),
+              ('x', {'y': {'z': 'Z'}})])
+    assert dunder_get(d, 'a') == 'A'
+    assert dunder_get(d, 'p__q') == 'Q'
+    assert dunder_get(d, 'x__y__z') == 'Z'
+
+
+def test_undunder_keys():
+    entry = {'request__url': 'http://example.com', 'request__headers': [{'name': 'Connection', 'value': 'Keep-Alive',}],
+             'response__status': 404, 'response__headers': [{'name': 'Date', 'value': 'Thu, 13 Jun 2013 06:43:14 GMT'}]}
+    assert_equal(undunder_keys(entry),
+                 {'request': {'url': 'http://example.com', 'headers': [{'name': 'Connection', 'value': 'Keep-Alive',}]},
+                  'response': {'status': 404, 'headers': [{'name': 'Date', 'value': 'Thu, 13 Jun 2013 06:43:14 GMT'}]}})
+
+
+def test_dunder_truncate():
+    entry = {'request__url': 'http://example.com', 'request__headers': [{'name': 'Connection', 'value': 'Keep-Alive',}],
+             'response__status': 404, 'response__headers': [{'name': 'Date', 'value': 'Thu, 13 Jun 2013 06:43:14 GMT'}]}
+    assert_equal(dunder_truncate(entry),
+                 {'url': 'http://example.com',
+                  'request__headers': [{'name': 'Connection', 'value': 'Keep-Alive',}],
+                  'status': 404,
+                  'response__headers': [{'name': 'Date', 'value': 'Thu, 13 Jun 2013 06:43:14 GMT'}]})
 
